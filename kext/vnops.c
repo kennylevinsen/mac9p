@@ -288,8 +288,10 @@ vnop_lookup_9p(struct vnop_lookup_args *ap)
 			else if (ismkentry(cnp) && dnp->dir.qid.vers!=0)
 				cache_enter(dvp, NULL, cnp);
 		}
+		nunlock_9p(dnp);
 		goto error;
 	}
+	nunlock_9p(dnp);
 
 	e = nget_9p(dnp->nmp, fid, qid, dvp, vpp, cnp, ap->a_context);
 	if (e || *vpp==NULL || NTO9P(*vpp)->fid!=fid) 
@@ -299,7 +301,6 @@ vnop_lookup_9p(struct vnop_lookup_args *ap)
 		nunlock_9p(NTO9P(*vpp));
 
 error:
-	nunlock_9p(dnp);
 	return e;
 }
 #undef isop
