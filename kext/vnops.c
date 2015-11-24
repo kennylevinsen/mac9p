@@ -82,12 +82,12 @@ dirvtype_9p(dir_9p *dp, int dotu, enum vtype *typep, dev_t *devp)
 		*typep = VFIFO;
 		return;
 	}
-	
+
 	if (ISSET(dp->mode, DMDEVICE) && dp->ext) {
 		if (sscanf(dp->ext, "%c %u %u", &c, &major, &minor) == 3) {
 			if (c == 'b')
 				*typep = VBLK;
-			else if (c == 'c') 
+			else if (c == 'c')
 				*typep = VCHR;
 			DEBUG("device %c major %d minor %d", *typep, major, minor);
 			*devp = (major<<20) | minor;
@@ -127,7 +127,7 @@ loop:
 		lck_mtx_unlock(nmp->nodelck);
 		if (vnode_getwithvid(np->vp, vid))
 			goto loop;
-		
+
 		nlock_9p(np, NODE_LCK_EXCLUSIVE);
 		if (dvp && cnp && ISSET(cnp->cn_flags, MAKEENTRY) && np->dir.qid.vers!=0) {
 			// DEBUG("caching %s", np->dir->name);
@@ -139,7 +139,7 @@ loop:
 		*vpp = np->vp;
 		return 0;
 	}
-	
+
 	if (fid == NOFID)
 		return EFAULT;
 
@@ -294,7 +294,7 @@ vnop_lookup_9p(struct vnop_lookup_args *ap)
 	nunlock_9p(dnp);
 
 	e = nget_9p(dnp->nmp, fid, qid, dvp, vpp, cnp, ap->a_context);
-	if (e || *vpp==NULL || NTO9P(*vpp)->fid!=fid) 
+	if (e || *vpp==NULL || NTO9P(*vpp)->fid!=fid)
 		clunk_9p(dnp->nmp, fid);
 
 	if (*vpp)
@@ -373,11 +373,11 @@ ncreate_9p(vnode_t dvp, vnode_t *vpp, struct componentname *cnp, struct vnode_at
 	default:
 		return EINVAL;
 	}
-	
+
 	if (ISSET(vap->va_vaflags, VA_EXCLUSIVE))
 		SET(mode, OEXCL);
 
-	
+
 	nlock_9p(dnp, NODE_LCK_EXCLUSIVE);
 	if ((e=walk_9p(nmp, dnp->fid, NULL, 0, &openfid, &qid)))
 		goto error;
@@ -455,7 +455,7 @@ vnop_open_9p(struct vnop_open_args *ap)
 
 	/* locks implemented on the vfs layer */
 	CLR(flags, O_EXLOCK|O_SHLOCK);
-    
+
 	if (ISSET(flags, O_TRUNC)) {
 		SET(mode, OTRUNC);
 		CLR(flags, O_TRUNC);
@@ -486,7 +486,7 @@ vnop_open_9p(struct vnop_open_args *ap)
 	op = ofidget(np, ap->a_mode);
 	if (op->fid == NOFID) {
 		if ((e=walk_9p(np->nmp, np->fid, NULL, 0, &fid, &qid)))
-			goto error;	
+			goto error;
 		if ((e=open_9p(np->nmp, fid, mode, &qid, &iounit)))
 			goto error;
 
@@ -527,10 +527,12 @@ vnop_close_9p(struct vnop_close_args *ap)
 		goto error;
 	}
 	if (OSDecrementAtomic(&op->ref) == 1) {
+		/** MMAP DISABLED
 		if (ISSET(np->flags, NODE_MMAPPED))
 			ubc_msync(np->vp, 0, ubc_getsize(np->vp), NULL, UBC_PUSHDIRTY|UBC_SYNC);
 		else
 			cluster_push(np->vp, IO_CLOSE);
+		**/
 
 		/* root gets clunk in vfs_unmount_9p() */
 		if (!ISSET(np->nmp->flags, F_UNMOUNTING))
@@ -625,7 +627,7 @@ vnop_setattr_9p(struct vnop_setattr_args *ap)
 
 	if (vnode_vfsisrdonly(vp))
 		return EROFS;
-	
+
 	if (vnode_isvroot(vp))
 		return EACCES;
 
@@ -741,15 +743,19 @@ vnop_read_9p(struct vnop_read_args *ap)
 		return 0;
 
 	nlock_9p(np, NODE_LCK_SHARED);
+	/** MMAP DISABLED
 	if (vnode_isnocache(vp) || ISSET(ap->a_ioflag, IO_NOCACHE)) {
 		if (ISSET(np->flags, NODE_MMAPPED))
 			ubc_msync(vp, 0, ubc_getsize(vp), NULL, UBC_PUSHDIRTY|UBC_SYNC);
 		else
 			cluster_push(vp, IO_SYNC);
 		ubc_msync(vp, uio_offset(uio), uio_offset(uio)+uio_resid(uio), NULL, UBC_INVALIDATE);
+	**/
 		e = nread_9p(np, uio);
+	/** MMAP DISABLED
 	} else
 		e = cluster_read(vp, uio, np->dir.length, ap->a_ioflag);
+	**/
 	nunlock_9p(np);
 	return e;
 }
@@ -803,7 +809,7 @@ vnop_write_9p(struct vnop_write_args *ap)
 	node_9p *np;
 	uio_t uio;
 	user_ssize_t resid;
-	off_t eof, zh, zt, off;
+	off_t /** MMAP DISABLED eof, zh, zt, **/ off;
 	int e, flag;
 
 	TRACE();
@@ -813,11 +819,11 @@ vnop_write_9p(struct vnop_write_args *ap)
 
 	if (vnode_isdir(vp))
 		return EISDIR;
-	
+
 	off = uio_offset(uio);
 	if (off < 0)
 		return EINVAL;
-	
+
 	resid = uio_resid(uio);
 	if (resid == 0)
 		return 0;
@@ -828,10 +834,13 @@ vnop_write_9p(struct vnop_write_args *ap)
 		uio_setoffset(uio, off);
 	}
 	nlock_9p(np, NODE_LCK_EXCLUSIVE);
+	/** MMAP DISABLED
 	if (vnode_isnocache(vp) || ISSET(flag, IO_NOCACHE)) {
 		ubc_msync(vp, uio_offset(uio), uio_offset(uio)+uio_resid(uio), NULL, UBC_PUSHDIRTY|UBC_SYNC);
 		ubc_msync(vp, uio_offset(uio), uio_offset(uio)+uio_resid(uio), NULL, UBC_INVALIDATE);
+	**/
 		e = nwrite_9p(np, uio);
+	/** MMAP DISABLED
 	} else {
 		zh = zt = 0;
 		eof = MAX(np->dir.length, resid+off);
@@ -853,6 +862,7 @@ vnop_write_9p(struct vnop_write_args *ap)
 			ubc_setsize(vp, eof);
 		}
 	}
+	**/
 	nunlock_9p(np);
 	return e;
 }
@@ -871,7 +881,7 @@ vnop_revoke_9p(struct vnop_revoke_args *ap)
 	TRACE();
 	return vn_revoke(ap->a_vp, ap->a_flags, ap->a_context);
 }
-
+/*
 static int
 vnop_mmap_9p(struct vnop_mmap_args *ap)
 {
@@ -889,7 +899,7 @@ static int
 vnop_mnomap_9p(struct vnop_mnomap_args *ap)
 {
 	node_9p *np;
-	
+
 	TRACE();
 	np = NTO9P(ap->a_vp);
 	nlock_9p(np, NODE_LCK_EXCLUSIVE);
@@ -897,7 +907,7 @@ vnop_mnomap_9p(struct vnop_mnomap_args *ap)
 	nunlock_9p(np);
 	return 0;
 }
-
+*/
 static int
 vnop_fsync_9p(struct vnop_fsync_args *ap)
 {
@@ -911,12 +921,14 @@ vnop_fsync_9p(struct vnop_fsync_args *ap)
 
 	np = NTO9P(ap->a_vp);
 	nlock_9p(np, NODE_LCK_EXCLUSIVE);
+	/** MMAP DISABLED
 	if (ubc_getsize(ap->a_vp)>0 && !vnode_isnocache(ap->a_vp)) {
 		if (ISSET(np->flags, NODE_MMAPPED))
 			ubc_msync(np->vp, 0, ubc_getsize(np->vp), NULL, UBC_PUSHDIRTY|UBC_SYNC);
 		else
 			cluster_push(np->vp, IO_SYNC);
 	}
+	**/
 	e = 0;
 	/* only sync write fids */
 	if (np->openfid[OWRITE].fid!=NOFID || np->openfid[ORDWR].fid!=NOFID) {
@@ -1056,7 +1068,7 @@ vnop_readdir_9p(struct vnop_readdir_args *ap)
 	uint32_t i, nd, nlen, plen;
 	void *p;
 	int e;
-	
+
 	TRACE();
 	vp = ap->a_vp;
 	uio = ap->a_uio;
@@ -1071,7 +1083,7 @@ vnop_readdir_9p(struct vnop_readdir_args *ap)
 	off = uio_offset(uio);
 	if (off < 0)
 		return EINVAL;
-	
+
 	if (uio_resid(uio) == 0)
 		return 0;
 
@@ -1092,7 +1104,7 @@ vnop_readdir_9p(struct vnop_readdir_args *ap)
 		if (np->ndirentries && np->direntries==NULL)
 			panic("bug in readdir");
 	}
-	
+
 	dp = np->direntries;
 	nd = np->ndirentries;
 	for (i=off; i<nd; i++) {
@@ -1145,7 +1157,7 @@ vnop_reclaim_9p(struct vnop_reclaim_args *ap)
 {
 	vnode_t vp;
 	node_9p *np;
-	
+
 	TRACE();
 	vp = ap->a_vp;
 	np = NTO9P(vp);
@@ -1213,7 +1225,7 @@ vnop_pathconf_9p(struct vnop_pathconf_args *ap)
 	case _PC_NAME_CHARS_MAX:
 		*ap->a_retval = NAME_MAX;
 		return 0;
-	
+
 	case _PC_CASE_SENSITIVE:
 	case _PC_CASE_PRESERVING:
 		*ap->a_retval = 1;
@@ -1226,6 +1238,7 @@ vnop_pathconf_9p(struct vnop_pathconf_args *ap)
 }
 
 /* already locked */
+/*
 static int
 vnop_pagein_9p(struct vnop_pagein_args *ap)
 {
@@ -1235,8 +1248,9 @@ vnop_pagein_9p(struct vnop_pagein_args *ap)
 	np = NTO9P(ap->a_vp);
 	return cluster_pagein(ap->a_vp, ap->a_pl, ap->a_pl_offset, ap->a_f_offset, ap->a_size, np->dir.length, ap->a_flags);
 }
-
+*/
 /* already locked */
+/*
 static int
 vnop_pageout_9p(struct vnop_pageout_args *ap)
 {
@@ -1249,12 +1263,13 @@ vnop_pageout_9p(struct vnop_pageout_args *ap)
 	np = NTO9P(ap->a_vp);
 	return cluster_pageout(ap->a_vp, ap->a_pl, ap->a_pl_offset, ap->a_f_offset, ap->a_size, np->dir.length, ap->a_flags);
 }
+*/
 
 static int
 vnop_blktooff_9p(struct vnop_blktooff_args *ap)
 {
 	mount_t mp;
-	
+
 	TRACE();
 	mp = vnode_mount(ap->a_vp);
 	if (mp == NULL)
@@ -1267,7 +1282,7 @@ static int
 vnop_offtoblk_9p(struct vnop_offtoblk_args *ap)
 {
 	mount_t mp;
-	
+
 	TRACE();
 	mp = vnode_mount(ap->a_vp);
 	if (mp == NULL)
@@ -1275,12 +1290,12 @@ vnop_offtoblk_9p(struct vnop_offtoblk_args *ap)
 	*ap->a_lblkno = ap->a_offset / vfs_statfs(mp)->f_bsize;
 	return 0;
 }
-
+/*
 static int
 vnop_blockmap_9p(struct vnop_blockmap_args *ap)
 {
 	mount_t mp;
-	
+
 	TRACE();
 	mp = vnode_mount(ap->a_vp);
 	if (mp == NULL)
@@ -1325,12 +1340,12 @@ vnop_strategy_9p(struct vnop_strategy_args *ap)
 		e = ENOMEM;
 		goto error;
 	}
-	
+
 	uio_addiov(uio, CAST_USER_ADDR_T(addr), buf_count(bp));
 	if (ISSET(flags, B_READ)) {
 		if((e=nread_9p(np, uio)))
 			goto error;
-		/* zero the rest of the page if we reached EOF */
+		// zero the rest of the page if we reached EOF
 		if (uio_resid(uio) > 0) {
 			bzero(addr+buf_count(bp)-uio_resid(uio), uio_resid(uio));
 			uio_update(uio, uio_resid(uio));
@@ -1349,7 +1364,7 @@ error:
 	buf_biodone(bp);
 	return e;
 }
-
+*/
 static int
 vnop_bwrite_9p(struct vnop_bwrite_args *ap)
 {
@@ -1399,8 +1414,8 @@ static struct vnodeopv_entry_desc vnode_entry_desc_9p[] ={
 	{ &vnop_select_desc,		(vnop_t*)vnop_select_9p		},
 //	{ &vnop_exchange_desc,		(vnop_t*)	},
 	{ &vnop_revoke_desc,		(vnop_t*)vnop_revoke_9p		},
-	{ &vnop_mmap_desc,			(vnop_t*)vnop_mmap_9p		},
-	{ &vnop_mnomap_desc,		(vnop_t*)vnop_mnomap_9p		},
+	// { &vnop_mmap_desc,			(vnop_t*)vnop_mmap_9p		},
+	// { &vnop_mnomap_desc,		(vnop_t*)vnop_mnomap_9p		},
 	{ &vnop_fsync_desc,			(vnop_t*)vnop_fsync_9p		},
 	{ &vnop_remove_desc,		(vnop_t*)vnop_remove_9p		},
 //	{ &vnop_link_desc,			(vnop_t*)	},	/* no links */
@@ -1417,8 +1432,8 @@ static struct vnodeopv_entry_desc vnode_entry_desc_9p[] ={
 //	{ &vnop_advlock_desc,		(vnop_t*)	},	/* vfs locks */
 //	{ &vnop_truncate_desc,		(vnop_t*)	},	/* obsolete */
 //	{ &vnop_allocate_desc,		(vnop_t*)	},	/* AFS/HFS */
-	{ &vnop_pagein_desc,		(vnop_t*)vnop_pagein_9p		},
-	{ &vnop_pageout_desc,		(vnop_t*)vnop_pageout_9p	},
+	// { &vnop_pagein_desc,		(vnop_t*)vnop_pagein_9p		},
+	// { &vnop_pageout_desc,		(vnop_t*)vnop_pageout_9p	},
 //	{ &vnop_searchfs_desc,		(vnop_t*)	},	/* no searchfs */
 //	{ &vnop_copyfile_desc,		(vnop_t*)	},	/* no copyfile */
 //	{ &vnop_getxattr_desc,		(vnop_t*)	},	/* vfs xattrs */
@@ -1427,8 +1442,8 @@ static struct vnodeopv_entry_desc vnode_entry_desc_9p[] ={
 //	{ &vnop_listxattr_desc,		(vnop_t*)	},	/* vfs xattrs */
 	{ &vnop_blktooff_desc,		(vnop_t*)vnop_blktooff_9p	},
 	{ &vnop_offtoblk_desc,		(vnop_t*)vnop_offtoblk_9p	},
-	{ &vnop_blockmap_desc,		(vnop_t*)vnop_blockmap_9p	},
-	{ &vnop_strategy_desc,		(vnop_t*)vnop_strategy_9p	},
+	// { &vnop_blockmap_desc,		(vnop_t*)vnop_blockmap_9p	},
+	// { &vnop_strategy_desc,		(vnop_t*)vnop_strategy_9p	},
 	{ &vnop_bwrite_desc,		(vnop_t*)vnop_bwrite_9p		},
 	{ NULL, NULL}
 };
